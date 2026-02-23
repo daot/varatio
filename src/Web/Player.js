@@ -27,25 +27,46 @@
     );
   }
 
+  let domCheckTimeout = null;
+
+  function triggerDomCheck() {
+    if (domCheckTimeout) return;
+    domCheckTimeout = setTimeout(() => {
+      domCheckTimeout = null;
+
+      const video = getVideoElement();
+      if (video && !video.dataset.varatioAttached) {
+        attachToVideo(video);
+      }
+
+      const sheets = document.querySelectorAll(".actionSheet");
+      for (let i = 0; i < sheets.length; i++) {
+        const sheet = sheets[i];
+        if (
+          sheet.querySelector('[data-id="aspectratio"]') ||
+          sheet.querySelector('[data-id="quality"]') ||
+          sheet.textContent.includes("Aspect Ratio") ||
+          sheet.textContent.includes("Playback Speed")
+        ) {
+          injectIntoActionSheet(sheet);
+        }
+      }
+    }, 500);
+  }
+
   function initVideoObserver() {
     if (observer) return;
 
     observer = new MutationObserver((mutations) => {
-      for (let m of mutations) {
-        if (m.addedNodes.length) {
-          // Check if a new video element was added or if we enter the player
-          const video = getVideoElement();
-          if (video && !video.dataset.varatioAttached) {
-            attachToVideo(video);
-          }
-
-          // Check if the OSd is open to inject our menu option
-          // Look for the aspect ratio menu
-          const aspectRatioMenu = document.querySelector(".aspectRatioMenu"); // just an example, we need to find the correct selector
-          if (aspectRatioMenu && !aspectRatioMenu.dataset.varatioAttached) {
-            injectMenuOption(aspectRatioMenu);
-          }
+      let requiresCheck = false;
+      for (let i = 0; i < mutations.length; i++) {
+        if (mutations[i].addedNodes.length > 0) {
+          requiresCheck = true;
+          break;
         }
+      }
+      if (requiresCheck) {
+        triggerDomCheck();
       }
     });
 
@@ -288,29 +309,7 @@
     // We will intercept the global player menu when it is rendered
   }
 
-  // Fallback: observe DOM for the ActionSheet / Dialog containing video settings to inject our menu item
-  new MutationObserver((mutations) => {
-    let shouldCheck = false;
-    for (const mutation of mutations) {
-      if (mutation.addedNodes.length > 0) {
-        shouldCheck = true;
-        break;
-      }
-    }
-    if (shouldCheck) {
-      const sheets = document.querySelectorAll(".actionSheet");
-      for (const sheet of sheets) {
-        if (
-          sheet.querySelector('[data-id="aspectratio"]') ||
-          sheet.querySelector('[data-id="quality"]') ||
-          sheet.textContent.includes("Aspect Ratio") ||
-          sheet.textContent.includes("Playback Speed")
-        ) {
-          injectIntoActionSheet(sheet);
-        }
-      }
-    }
-  }).observe(document.body, { childList: true, subtree: true });
+  // We use a single observer now inside initVideoObserver()
 
   function injectIntoActionSheet(actionSheet) {
     // Check if our option is already there

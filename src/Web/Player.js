@@ -232,6 +232,10 @@
       video.style.willChange = "transform";
     }
 
+    // Time extrapolation for browsers without requestVideoFrameCallback
+    let lastVideoTime = -1;
+    let lastVideoTimeObservedAt = 0;
+
     const loop = (now, metadata) => {
       // Hot path: Minimize GC allocations and DOM access to avoid video skipping
       if (
@@ -241,11 +245,23 @@
         !video.paused &&
         !video.ended
       ) {
-        // Use exact frame time if available, otherwise fallback to video.currentTime
-        const currentTime =
-          metadata && typeof metadata.mediaTime === "number"
-            ? metadata.mediaTime
-            : video.currentTime;
+        let currentTime = 0;
+
+        // requestVideoFrameCallback provides exact presentation timestamp
+        if (metadata && typeof metadata.mediaTime === "number") {
+          currentTime = metadata.mediaTime;
+        } else {
+          // Fallback for Firefox/rAF: video.currentTime updates chunky (e.g. 250ms jumps)
+          // We interpolate the exact time using Date.now()
+          if (video.currentTime !== lastVideoTime) {
+            lastVideoTime = video.currentTime;
+            lastVideoTimeObservedAt = Date.now();
+          }
+          const elapsedTimeSinceLastTick =
+            (Date.now() - lastVideoTimeObservedAt) / 1000.0;
+          currentTime =
+            lastVideoTime + elapsedTimeSinceLastTick * video.playbackRate;
+        }
 
         // Find applicable segment
         // Add 10ms (0.01) epsilon to fix float precision sync issues (ensures we don't apply one frame late)

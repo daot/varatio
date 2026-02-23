@@ -36,7 +36,7 @@ jobs:
           echo "set version to ${GITHUB_REF#refs/tags/}"
           sed -i "s|version: .*|version: '${GITHUB_REF#refs/tags/}'|" ./src/build.yaml
 
-          COMMIT_RANGE=$(git describe --tags --abbrev=0 @^)..@
+          COMMIT_RANGE=$(git describe --tags --abbrev=0 @^ 2>/dev/null)..@ || COMMIT_RANGE=$(git rev-list --max-parents=0 HEAD)..@
           echo "generate changelog for commit range ${COMMIT_RANGE}"
           CHANGELOG=$(git log "$COMMIT_RANGE" --oneline --pretty=format:"- [%h] %s")
           sed -i 's/changelog: changelog/changelog: |-\n/' ./src/build.yaml

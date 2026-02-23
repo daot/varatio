@@ -8,6 +8,14 @@
         "category": "General",
         "versions": [
             {
+                "version": "0.1.2.0",
+                "changelog": "\n- [a920913] Fix: Player.js injection robustness and WebInjector cache busting\n- [c78a52f] Update manifest.json for release v0.1.1",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/daot/varatio/releases/download/v0.1.2/varatio_0.1.2.0.zip",
+                "checksum": "86b72ef5317adce4809fb4d7735049d9",
+                "timestamp": "2026-02-23T19:27:43Z"
+            },
+            {
                 "version": "0.1.1.0",
                 "changelog": "\n- [f27a622] Merge branch 'main' of https://github.com/daot/varatio\n- [8985d2f] Update Player.js\n- [837e075] Update manifest.json for release v0.1.0",
                 "targetAbi": "10.11.0.0",

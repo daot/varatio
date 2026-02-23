@@ -100,18 +100,9 @@
         const timeStr = lines[i + 1];
         const ratioStr = lines[i + 2];
 
-        let time = null;
         if (timeStr.startsWith("Time:")) {
-          // v2 format
-          time = parseFloat(timeStr.split(":")[1].trim());
-        } else if (timeStr.includes(":")) {
-          // v1 format fallback
-          time = parseTime(timeStr);
-        }
-
-        if (time !== null) {
           data.segments.push({
-            time: time,
+            time: parseFloat(timeStr.split(":")[1].trim()),
             ratio: parseFloat(ratioStr),
           });
           i += 2;
@@ -123,21 +114,6 @@
     // Sort by time
     data.segments.sort((a, b) => a.time - b.time);
     return data;
-  }
-
-  function parseTime(timeStr) {
-    // HH:MM:SS.mmm
-    const parts = timeStr.split(":");
-    if (parts.length === 3) {
-      const secParts = parts[2].split(".");
-      return (
-        parseInt(parts[0]) * 3600 +
-        parseInt(parts[1]) * 60 +
-        parseInt(secParts[0]) +
-        (secParts.length > 1 ? parseInt(secParts[1]) / 1000 : 0)
-      );
-    }
-    return 0;
   }
 
   function scheduleNextFrame(video, callback) {
@@ -200,24 +176,33 @@
     });
 
     video.addEventListener("pause", () => {
-      cancelScheduledFrame(video, animationFrameId);
+      if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
+      animationFrameId = null;
     });
 
     video.addEventListener("ended", () => {
-      cancelScheduledFrame(video, animationFrameId);
+      if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
+      animationFrameId = null;
     });
 
     // Clean up when video unloads
     const cleanup = () => {
       video.style.transform = "";
+      video.dataset.currentRatio = ""; // reset ratio cache
       varData = null;
       currentItemId = null;
-      cancelScheduledFrame(video, animationFrameId);
+      if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
+      animationFrameId = null;
     };
     video.addEventListener("emptied", cleanup);
   }
 
   function startCroppingLoop(video) {
+    if (animationFrameId) {
+      cancelScheduledFrame(video, animationFrameId);
+      animationFrameId = null;
+    }
+
     const loop = (now, metadata) => {
       if (autoCropEnabled && !varData && !fetchingItemId) {
         let currentId = new URLSearchParams(window.location.search).get("id");
@@ -256,12 +241,16 @@
           }
         }
 
-        if (currentRatio) {
+        if (
+          currentRatio &&
+          currentRatio.toString() !== video.dataset.currentRatio
+        ) {
           applyCrop(video, currentRatio);
+          video.dataset.currentRatio = currentRatio.toString();
         }
       }
 
-      if (autoCropEnabled) {
+      if (autoCropEnabled && !video.paused && !video.ended) {
         animationFrameId = scheduleNextFrame(video, loop);
       }
     };
@@ -358,7 +347,9 @@
         const video = getVideoElement();
         if (video) {
           video.style.transform = "";
-          cancelScheduledFrame(video, animationFrameId);
+          video.dataset.currentRatio = ""; // reset ratio
+          if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
+          animationFrameId = null;
         }
       }
     });

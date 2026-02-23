@@ -48,8 +48,7 @@ public partial class AspectRatioAnalyzer
         // ── Step 2: First-pass Frame Analysis ───────────────────────
         _logger.LogInformation("Starting fast-pass frame analysis for {File}...", Path.GetFileName(filePath));
         var fastSamples = await ProbeFramesAsync(
-            ffmpegPath, filePath, info, config.BlackFrameThreshold, 
-            isFastPass: true, startSec: null, durationSec: null, ct);
+            ffmpegPath, filePath, info, config.BlackFrameThreshold, ct);
 
         fastSamples.Sort((a, b) => a.Time.CompareTo(b.Time));
 
@@ -80,74 +79,25 @@ public partial class AspectRatioAnalyzer
             .Where(s => LabelFor(s.Ratio) == dominantLabel)
             .Average(s => s.Ratio);
 
-        // Replace unknown/text frames (-1) with dominant ratio
+        // Replace unknown/text frames (-1) with the last valid ratio
+        // This enforces that transitions occurring during a black fade
+        // will safely occur only on the first visible bright frame of the new aspect ratio.
+        double lastValidRatio = dominantRatio;
         for (int i = 0; i < fastSamples.Count; i++)
         {
             if (fastSamples[i].Ratio < 0)
             {
-                fastSamples[i] = fastSamples[i] with { Ratio = dominantRatio };
+                fastSamples[i] = fastSamples[i] with { Ratio = lastValidRatio };
+            }
+            else
+            {
+                lastValidRatio = fastSamples[i].Ratio;
             }
         }
 
         // ── Step 3: Build and Merge Segments ─────────────────────────────
         var fastSegments = BuildSegments(fastSamples, info.Duration, tolerance);
-        fastSegments = MergeShortSegments(fastSegments, config.MinSegmentDurationSeconds, tolerance);
-
-        // ── Step 4: Second-pass Precise Analysis ─────────────────────────
-        var refinedSegments = new List<AspectRatioSegment>();
-
-        for (int i = 0; i < fastSegments.Count; i++)
-        {
-            var seg = fastSegments[i];
-
-            if (i == 0)
-            {
-                refinedSegments.Add(seg with { StartTime = 0 });
-                continue;
-            }
-
-            var approxTime = seg.StartTime;
-            var prevRatio = refinedSegments[i - 1].AspectRatio;
-            var newRatio = seg.AspectRatio;
-
-            // Search window: 10s before approx transition to 10s after.
-            var windowStart = Math.Max(0, approxTime - 10.0);
-            var windowDuration = 20.0;
-
-            _logger.LogInformation("Refining transition at ~{T:F2}s, checking [{Start:F2}s - {End:F2}s]", 
-                approxTime, windowStart, windowStart + windowDuration);
-
-            var detailedSamples = await ProbeFramesAsync(
-                ffmpegPath, filePath, info, config.BlackFrameThreshold, 
-                isFastPass: false, startSec: windowStart, durationSec: windowDuration, ct);
-
-            detailedSamples.Sort((a, b) => a.Time.CompareTo(b.Time));
-
-            var exactTime = approxTime;
-            bool found = false;
-
-            foreach (var sample in detailedSamples)
-            {
-                if (sample.Ratio > 0 && Math.Abs(sample.Ratio - newRatio) <= tolerance)
-                {
-                    exactTime = sample.Time;
-                    found = true;
-                    break;
-                }
-            }
-
-            if (found)
-            {
-                _logger.LogInformation("Precise transition found at {T:F3}s", exactTime);
-            }
-            else
-            {
-                _logger.LogWarning("Could not refine transition around {T:F2}s, using approx.", approxTime);
-            }
-
-            refinedSegments[i - 1] = refinedSegments[i - 1] with { EndTime = exactTime };
-            refinedSegments.Add(seg with { StartTime = exactTime });
-        }
+        var refinedSegments = MergeShortSegments(fastSegments, config.MinSegmentDurationSeconds, tolerance);
 
         if (refinedSegments.Count > 0)
         {
@@ -209,30 +159,12 @@ public partial class AspectRatioAnalyzer
 
     
     private async Task<List<Sample>> ProbeFramesAsync(
-        string ffmpeg, string file, VideoInfo info, int blackThreshold, 
-        bool isFastPass, double? startSec, double? durationSec, CancellationToken ct)
+        string ffmpeg, string file, VideoInfo info, int blackThreshold, CancellationToken ct)
     {
         var limit = (blackThreshold / 255.0).ToString("F3", CultureInfo.InvariantCulture);
 
-        var preArgs = "";
-        var postArgs = "";
-
-        if (isFastPass)
-        {
-            preArgs = "-skip_frame noref";
-        }
-        else
-        {
-            if (startSec.HasValue) 
-                preArgs += $"-ss {startSec.Value.ToString(CultureInfo.InvariantCulture)} ";
-            preArgs += "-copyts";
-            
-            if (durationSec.HasValue) 
-                postArgs += $"-t {durationSec.Value.ToString(CultureInfo.InvariantCulture)} ";
-        }
-
         var args =
-            $"-nostdin -hwaccel videotoolbox {preArgs} -i \"{file}\" {postArgs} -an -sn -dn " +
+            $"-nostdin -hwaccel videotoolbox -copyts -i \"{file}\" -an -sn -dn " +
             $"-vf \"format=yuv420p,cropdetect=limit={limit}:round=2:reset=1\" " +
             $"-f null -";
 
@@ -303,9 +235,15 @@ public partial class AspectRatioAnalyzer
         {
             if (Math.Abs(samples[i].Ratio - curRatio) > tolerance)
             {
-                segs.Add(MakeSeg(segStart, samples[i].Time, curRatio));
+                // MKV timestamps round to the nearest millisecond, sometimes rounding UP.
+                // e.g. 88.421683 -> 88.422. This round-up causes >= threshold checks to fail
+                // for the exact target frame in Javascript and FFmpeg, firing one frame late!
+                // We subtract a safe 5ms padding margin so it always falls right before the frame.
+                var safeTime = samples[i].Time > 0.005 ? samples[i].Time - 0.005 : samples[i].Time;
+
+                segs.Add(MakeSeg(segStart, safeTime, curRatio));
                 curRatio = samples[i].Ratio;
-                segStart = samples[i].Time;
+                segStart = safeTime;
             }
         }
 

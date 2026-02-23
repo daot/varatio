@@ -10,6 +10,7 @@
   let fetchingItemId = null;
   let observer = null;
   let animationFrameId = null;
+  let currentVideoRatio = null;
 
   // Listen for Jellyfin web client events
   document.addEventListener("viewshow", function (e) {
@@ -209,7 +210,9 @@
     // Clean up when video unloads
     const cleanup = () => {
       video.style.transform = "";
+      video.style.willChange = "";
       video.dataset.currentRatio = ""; // reset ratio cache
+      currentVideoRatio = null;
       varData = null;
       currentItemId = null;
       if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
@@ -224,28 +227,19 @@
       animationFrameId = null;
     }
 
-    const loop = (now, metadata) => {
-      if (autoCropEnabled && !varData && !fetchingItemId) {
-        let currentId = new URLSearchParams(window.location.search).get("id");
-        if (
-          !currentId &&
-          window.ApiClient &&
-          window.ApiClient.lastPlaybackProgressOptions
-        ) {
-          currentId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
-        }
-        if (currentId && currentId !== currentItemId) {
-          currentItemId = currentId;
-          fetchVarData(currentId);
-        }
-      }
+    // Set will-change to prevent stuttering when transform applies
+    if (video.style.willChange !== "transform") {
+      video.style.willChange = "transform";
+    }
 
+    const loop = (now, metadata) => {
+      // Hot path: Minimize GC allocations and DOM access to avoid video skipping
       if (
-        !video.paused &&
-        !video.ended &&
         varData &&
         varData.segments.length > 0 &&
-        autoCropEnabled
+        autoCropEnabled &&
+        !video.paused &&
+        !video.ended
       ) {
         // Use exact frame time if available, otherwise fallback to video.currentTime
         const currentTime =
@@ -254,20 +248,39 @@
             : video.currentTime;
 
         // Find applicable segment
-        let currentRatio = null;
+        // Add 10ms (0.01) epsilon to fix float precision sync issues (ensures we don't apply one frame late)
+        let newRatio = varData.segments[0].ratio;
         for (let i = varData.segments.length - 1; i >= 0; i--) {
-          if (currentTime >= varData.segments[i].time) {
-            currentRatio = varData.segments[i].ratio;
+          if (currentTime + 0.01 >= varData.segments[i].time) {
+            newRatio = varData.segments[i].ratio;
             break;
           }
         }
 
+        if (newRatio && newRatio !== currentVideoRatio) {
+          applyCrop(video, newRatio);
+          currentVideoRatio = newRatio;
+          video.dataset.currentRatio = newRatio.toString();
+        }
+      } else if (autoCropEnabled && !varData && !fetchingItemId) {
+        // We defer URLSearchParams out of the hot path by checking only once a second
         if (
-          currentRatio &&
-          currentRatio.toString() !== video.dataset.currentRatio
+          !video.dataset.lastVarCheck ||
+          now - parseFloat(video.dataset.lastVarCheck) > 2000
         ) {
-          applyCrop(video, currentRatio);
-          video.dataset.currentRatio = currentRatio.toString();
+          video.dataset.lastVarCheck = now.toString();
+          let currentId = new URLSearchParams(window.location.search).get("id");
+          if (
+            !currentId &&
+            window.ApiClient &&
+            window.ApiClient.lastPlaybackProgressOptions
+          ) {
+            currentId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
+          }
+          if (currentId && currentId !== currentItemId) {
+            currentItemId = currentId;
+            fetchVarData(currentId);
+          }
         }
       }
 
@@ -346,7 +359,9 @@
         const video = getVideoElement();
         if (video) {
           video.style.transform = "";
+          video.style.willChange = "";
           video.dataset.currentRatio = ""; // reset ratio
+          currentVideoRatio = null;
           if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
           animationFrameId = null;
         }

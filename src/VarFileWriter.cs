@@ -27,7 +27,7 @@ public static class VarFileWriter
         var sb = new StringBuilder();
 
         // Header
-        sb.AppendLine("[VARatio v1]");
+        sb.AppendLine("[VARatio v2]");
         sb.AppendLine(CultureInfo.InvariantCulture, $"FrameWidth: {result.FrameWidth}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"FrameHeight: {result.FrameHeight}");
         sb.AppendLine(CultureInfo.InvariantCulture, $"SourceFile: {sourceFileName}");
@@ -38,8 +38,7 @@ public static class VarFileWriter
         {
             var seg = result.Segments[i];
             sb.AppendLine(CultureInfo.InvariantCulture, $"{i + 1}");
-            sb.AppendLine(CultureInfo.InvariantCulture,
-                $"{FormatTimestamp(seg.StartTime)}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Time: {seg.StartTime:F6}");
             sb.AppendLine(seg.AspectRatioLabel);
 
             if (i < result.Segments.Count - 1)
@@ -49,13 +48,6 @@ public static class VarFileWriter
         }
 
         await File.WriteAllTextAsync(varFilePath, sb.ToString(), Encoding.UTF8, cancellationToken);
-        logger.LogInformation("Wrote VARatio file: {Path}", varFilePath);
-    }
-
-    
-    private static string FormatTimestamp(double seconds)
-    {
-        var ts = TimeSpan.FromSeconds(seconds);
-        return $"{(int)ts.TotalHours:D2}:{ts.Minutes:D2}:{ts.Seconds:D2}.{ts.Milliseconds:D3}";
+        logger.LogInformation("Wrote VARatio v2 file: {Path}", varFilePath);
     }
 }

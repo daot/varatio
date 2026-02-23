@@ -99,9 +99,19 @@
       if (/^\d+$/.test(line) && i + 2 < lines.length) {
         const timeStr = lines[i + 1];
         const ratioStr = lines[i + 2];
-        if (timeStr.includes(":")) {
+
+        let time = null;
+        if (timeStr.startsWith("Time:")) {
+          // v2 format
+          time = parseFloat(timeStr.split(":")[1].trim());
+        } else if (timeStr.includes(":")) {
+          // v1 format fallback
+          time = parseTime(timeStr);
+        }
+
+        if (time !== null) {
           data.segments.push({
-            time: parseTime(timeStr),
+            time: time,
             ratio: parseFloat(ratioStr),
           });
           i += 2;
@@ -128,6 +138,22 @@
       );
     }
     return 0;
+  }
+
+  function scheduleNextFrame(video, callback) {
+    if ("requestVideoFrameCallback" in video) {
+      return video.requestVideoFrameCallback(callback);
+    } else {
+      return requestAnimationFrame(callback);
+    }
+  }
+
+  function cancelScheduledFrame(video, id) {
+    if ("cancelVideoFrameCallback" in video) {
+      video.cancelVideoFrameCallback(id);
+    } else {
+      cancelAnimationFrame(id);
+    }
   }
 
   function attachToVideo(video) {
@@ -174,11 +200,11 @@
     });
 
     video.addEventListener("pause", () => {
-      cancelAnimationFrame(animationFrameId);
+      cancelScheduledFrame(video, animationFrameId);
     });
 
     video.addEventListener("ended", () => {
-      cancelAnimationFrame(animationFrameId);
+      cancelScheduledFrame(video, animationFrameId);
     });
 
     // Clean up when video unloads
@@ -186,13 +212,13 @@
       video.style.transform = "";
       varData = null;
       currentItemId = null;
-      cancelAnimationFrame(animationFrameId);
+      cancelScheduledFrame(video, animationFrameId);
     };
     video.addEventListener("emptied", cleanup);
   }
 
   function startCroppingLoop(video) {
-    const loop = () => {
+    const loop = (now, metadata) => {
       if (autoCropEnabled && !varData && !fetchingItemId) {
         let currentId = new URLSearchParams(window.location.search).get("id");
         if (
@@ -215,7 +241,12 @@
         varData.segments.length > 0 &&
         autoCropEnabled
       ) {
-        const currentTime = video.currentTime;
+        // Use exact frame time if available, otherwise fallback to video.currentTime
+        const currentTime =
+          metadata && typeof metadata.mediaTime === "number"
+            ? metadata.mediaTime
+            : video.currentTime;
+
         // Find applicable segment
         let currentRatio = null;
         for (let i = varData.segments.length - 1; i >= 0; i--) {
@@ -229,9 +260,12 @@
           applyCrop(video, currentRatio);
         }
       }
-      animationFrameId = requestAnimationFrame(loop);
+
+      if (autoCropEnabled) {
+        animationFrameId = scheduleNextFrame(video, loop);
+      }
     };
-    animationFrameId = requestAnimationFrame(loop);
+    animationFrameId = scheduleNextFrame(video, loop);
   }
 
   function applyCrop(video, targetAspectRatio) {
@@ -324,7 +358,7 @@
         const video = getVideoElement();
         if (video) {
           video.style.transform = "";
-          cancelAnimationFrame(animationFrameId);
+          cancelScheduledFrame(video, animationFrameId);
         }
       }
     });

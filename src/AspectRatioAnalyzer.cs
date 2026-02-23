@@ -45,25 +45,26 @@ public partial class AspectRatioAnalyzer
 
         var sw = Stopwatch.StartNew();
 
-        // ── Step 2: Single-pass Frame Analysis ───────────────────────
-        _logger.LogInformation("Starting single-pass frame analysis for {File}...", Path.GetFileName(filePath));
-        var samples = await ProbeAllFramesAsync(
-            ffmpegPath, filePath, info, config.BlackFrameThreshold, ct);
+        // ── Step 2: First-pass Frame Analysis ───────────────────────
+        _logger.LogInformation("Starting fast-pass frame analysis for {File}...", Path.GetFileName(filePath));
+        var fastSamples = await ProbeFramesAsync(
+            ffmpegPath, filePath, info, config.BlackFrameThreshold, 
+            isFastPass: true, startSec: null, durationSec: null, ct);
 
-        samples.Sort((a, b) => a.Time.CompareTo(b.Time));
+        fastSamples.Sort((a, b) => a.Time.CompareTo(b.Time));
 
         _logger.LogInformation(
             "Collected {N} keyframe samples in {E:F1}s",
-            samples.Count, sw.Elapsed.TotalSeconds);
+            fastSamples.Count, sw.Elapsed.TotalSeconds);
 
-        if (samples.Count == 0)
+        if (fastSamples.Count == 0)
         {
             _logger.LogWarning("No valid samples for {File}", filePath);
             return AnalysisResult.Empty;
         }
 
         // Find dominant ratio
-        var validSamples = samples.Where(s => s.Ratio > 0).ToList();
+        var validSamples = fastSamples.Where(s => s.Ratio > 0).ToList();
         if (validSamples.Count == 0)
         {
             _logger.LogWarning("No non-windowboxed samples found for {File}", filePath);
@@ -80,33 +81,94 @@ public partial class AspectRatioAnalyzer
             .Average(s => s.Ratio);
 
         // Replace unknown/text frames (-1) with dominant ratio
-        for (int i = 0; i < samples.Count; i++)
+        for (int i = 0; i < fastSamples.Count; i++)
         {
-            if (samples[i].Ratio < 0)
+            if (fastSamples[i].Ratio < 0)
             {
-                samples[i] = samples[i] with { Ratio = dominantRatio };
+                fastSamples[i] = fastSamples[i] with { Ratio = dominantRatio };
             }
         }
 
         // ── Step 3: Build and Merge Segments ─────────────────────────────
-        var segments = BuildSegments(samples, info.Duration, tolerance);
-        segments = MergeShortSegments(segments, config.MinSegmentDurationSeconds, tolerance);
+        var fastSegments = BuildSegments(fastSamples, info.Duration, tolerance);
+        fastSegments = MergeShortSegments(fastSegments, config.MinSegmentDurationSeconds, tolerance);
+
+        // ── Step 4: Second-pass Precise Analysis ─────────────────────────
+        var refinedSegments = new List<AspectRatioSegment>();
+
+        for (int i = 0; i < fastSegments.Count; i++)
+        {
+            var seg = fastSegments[i];
+
+            if (i == 0)
+            {
+                refinedSegments.Add(seg with { StartTime = 0 });
+                continue;
+            }
+
+            var approxTime = seg.StartTime;
+            var prevRatio = refinedSegments[i - 1].AspectRatio;
+            var newRatio = seg.AspectRatio;
+
+            // Search window: 10s before approx transition to 10s after.
+            var windowStart = Math.Max(0, approxTime - 10.0);
+            var windowDuration = 20.0;
+
+            _logger.LogInformation("Refining transition at ~{T:F2}s, checking [{Start:F2}s - {End:F2}s]", 
+                approxTime, windowStart, windowStart + windowDuration);
+
+            var detailedSamples = await ProbeFramesAsync(
+                ffmpegPath, filePath, info, config.BlackFrameThreshold, 
+                isFastPass: false, startSec: windowStart, durationSec: windowDuration, ct);
+
+            detailedSamples.Sort((a, b) => a.Time.CompareTo(b.Time));
+
+            var exactTime = approxTime;
+            bool found = false;
+
+            foreach (var sample in detailedSamples)
+            {
+                if (sample.Ratio > 0 && Math.Abs(sample.Ratio - newRatio) <= tolerance)
+                {
+                    exactTime = sample.Time;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (found)
+            {
+                _logger.LogInformation("Precise transition found at {T:F3}s", exactTime);
+            }
+            else
+            {
+                _logger.LogWarning("Could not refine transition around {T:F2}s, using approx.", approxTime);
+            }
+
+            refinedSegments[i - 1] = refinedSegments[i - 1] with { EndTime = exactTime };
+            refinedSegments.Add(seg with { StartTime = exactTime });
+        }
+
+        if (refinedSegments.Count > 0)
+        {
+            refinedSegments[^1] = refinedSegments[^1] with { EndTime = info.Duration };
+        }
 
         sw.Stop();
         _logger.LogInformation("Total analysis: {E:F1}s", sw.Elapsed.TotalSeconds);
 
-        if (segments.Count <= 1)
+        if (refinedSegments.Count <= 1)
         {
             _logger.LogInformation("Uniform aspect ratio in {File}", Path.GetFileName(filePath));
             return AnalysisResult.Empty;
         }
 
         _logger.LogInformation("{File}: {N} aspect ratio segments detected",
-            Path.GetFileName(filePath), segments.Count);
+            Path.GetFileName(filePath), refinedSegments.Count);
 
         return new AnalysisResult
         {
-            Segments = segments,
+            Segments = refinedSegments,
             FrameWidth = info.Width,
             FrameHeight = info.Height
         };
@@ -146,13 +208,31 @@ public partial class AspectRatioAnalyzer
     }
 
     
-    private async Task<List<Sample>> ProbeAllFramesAsync(
-        string ffmpeg, string file, VideoInfo info, int blackThreshold, CancellationToken ct)
+    private async Task<List<Sample>> ProbeFramesAsync(
+        string ffmpeg, string file, VideoInfo info, int blackThreshold, 
+        bool isFastPass, double? startSec, double? durationSec, CancellationToken ct)
     {
         var limit = (blackThreshold / 255.0).ToString("F3", CultureInfo.InvariantCulture);
 
+        var preArgs = "";
+        var postArgs = "";
+
+        if (isFastPass)
+        {
+            preArgs = "-skip_frame noref";
+        }
+        else
+        {
+            if (startSec.HasValue) 
+                preArgs += $"-ss {startSec.Value.ToString(CultureInfo.InvariantCulture)} ";
+            preArgs += "-copyts";
+            
+            if (durationSec.HasValue) 
+                postArgs += $"-t {durationSec.Value.ToString(CultureInfo.InvariantCulture)} ";
+        }
+
         var args =
-            $"-nostdin -hwaccel videotoolbox -skip_frame noref -i \"{file}\" -an -sn -dn " +
+            $"-nostdin -hwaccel videotoolbox {preArgs} -i \"{file}\" {postArgs} -an -sn -dn " +
             $"-vf \"format=yuv420p,cropdetect=limit={limit}:round=2:reset=1\" " +
             $"-f null -";
 

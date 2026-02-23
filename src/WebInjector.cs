@@ -25,7 +25,7 @@ public class WebInjector : IHostedService
             if (File.Exists(indexPath))
             {
                 var content = File.ReadAllText(indexPath);
-                var version = typeof(WebInjector).Assembly.GetName().Version?.ToString() ?? "1.0";
+                var version = Guid.NewGuid().ToString("N");
                 var scriptTag = $"<script src=\"/VARatio/Player.js?v={version}\"></script>";
 
                 bool changed = false;

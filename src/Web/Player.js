@@ -53,7 +53,17 @@
 
   async function fetchVarData(itemId) {
     try {
-      const response = await fetch("/VARatio/Data?itemId=" + itemId);
+      const headers = {};
+      if (
+        window.ApiClient &&
+        typeof window.ApiClient.accessToken === "function"
+      ) {
+        headers["Authorization"] =
+          'MediaBrowser Token="' + window.ApiClient.accessToken() + '"';
+      }
+      const response = await fetch("/VARatio/Data?itemId=" + itemId, {
+        headers,
+      });
       if (response.ok) {
         const text = await response.text();
         varData = parseVarData(text);
@@ -69,15 +79,6 @@
   }
 
   function parseVarData(text) {
-    // [VARatio v1]
-    // FrameWidth: 1920
-    // FrameHeight: 1080
-    // SourceFile: Interstellar...mkv
-    //
-    // 1
-    // 00:00:29.154
-    // 2.20
-
     const lines = text.split("\n").map((l) => l.trim());
     const data = { segments: [] };
 
@@ -233,11 +234,11 @@
             // Look for actionSheet which contains the Video Settings / Aspect Ratio menus
             if (node.classList && node.classList.contains("actionSheet")) {
               // Check contents to see if it's the video settings menu
-              const title = node.querySelector(".actionSheetTitle");
               if (
-                title &&
-                (title.textContent.includes("Video") ||
-                  title.textContent.includes("Aspect"))
+                node.querySelector('[data-id="aspectratio"]') ||
+                node.querySelector('[data-id="quality"]') ||
+                node.textContent.includes("Aspect Ratio") ||
+                node.textContent.includes("Playback Speed")
               ) {
                 injectIntoActionSheet(node);
               }

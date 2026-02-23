@@ -36,14 +36,9 @@ jobs:
           echo "set version to ${GITHUB_REF#refs/tags/}"
           sed -i "s|version: .*|version: '${GITHUB_REF#refs/tags/}'|" ./src/build.yaml
 
-          if git describe --tags --abbrev=0 @^ >/dev/null 2>&1; then
-            COMMIT_RANGE=$(git describe --tags --abbrev=0 @^)..@
-            echo "generate changelog for commit range ${COMMIT_RANGE}"
-            CHANGELOG=$(git log "$COMMIT_RANGE" --oneline --pretty=format:"- [%h] %s")
-          else
-            echo "No previous tags found, generating changelog for all commits"
-            CHANGELOG=$(git log --oneline --pretty=format:"- [%h] %s")
-          fi
+          COMMIT_RANGE=$(git describe --tags --abbrev=0 @^)..@
+          echo "generate changelog for commit range ${COMMIT_RANGE}"
+          CHANGELOG=$(git log "$COMMIT_RANGE" --oneline --pretty=format:"- [%h] %s")
           sed -i 's/changelog: changelog/changelog: |-\n/' ./src/build.yaml
           echo -e "$CHANGELOG" | sed 's/^/  /' >> ./src/build.yaml
           mkdir -p ./artifacts

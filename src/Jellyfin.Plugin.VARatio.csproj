@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>Jellyfin.Plugin.VARatio</RootNamespace>
+        <AssemblyName>Jellyfin.Plugin.VARatio</AssemblyName>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Jellyfin.Controller" Version="10.11" />
+        <PackageReference Include="Jellyfin.Model" Version="10.11" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <None Remove="config.html"/>
+        <EmbeddedResource Include="config.html"/>
+        <EmbeddedResource Include="Web\Player.js"/>
+    </ItemGroup>
+</Project>

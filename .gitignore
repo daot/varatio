@@ -1,0 +1,13 @@
+/jellyfin*/
+dumps/
+data.ms/
+*.exe
+*.pdb
+*.dll
+bin/
+obj/
+.idea/
+*.user
+.vs/
+test/
+.DS_Store

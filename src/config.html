@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>VARatio Settings</title>
+    <style>
+      .varatio-config {
+        max-width: 600px;
+        margin: 1em auto;
+      }
+      .varatio-config .field {
+        margin-bottom: 1.2em;
+      }
+      .varatio-config label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 0.3em;
+      }
+      .varatio-config .field-description {
+        font-size: 0.85em;
+        color: #888;
+        margin-top: 0.2em;
+      }
+      .varatio-config input[type="number"],
+      .varatio-config input[type="text"] {
+        width: 100%;
+        padding: 0.5em;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: #1a1a1a;
+        color: #eee;
+        font-size: 1em;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="VARatioConfigPage"
+      data-role="page"
+      class="page type-interior pluginConfigurationPage"
+      data-require="emby-input,emby-button"
+    >
+      <div data-role="content">
+        <div class="content-primary">
+          <h2>VARatio — Variable Aspect Ratio Detector</h2>
+          <p>
+            Configure how VARatio analyzes your movies for aspect ratio changes.
+          </p>
+
+          <form id="VARatioConfigForm" class="varatio-config">
+            <div class="field">
+              <label for="BlackFrameThreshold"
+                >Black Frame Threshold (0–255)</label
+              >
+              <input
+                id="BlackFrameThreshold"
+                type="number"
+                min="0"
+                max="255"
+                is="emby-input"
+              />
+              <div class="field-description">
+                Luma value below which a frame is considered black and skipped.
+                Default: 16
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="RatioTolerance">Ratio Tolerance</label>
+              <input
+                id="RatioTolerance"
+                type="number"
+                min="0.01"
+                max="0.5"
+                step="0.01"
+                is="emby-input"
+              />
+              <div class="field-description">
+                Tolerance for grouping similar ratios (e.g. 0.05 treats 2.35 and
+                2.39 as the same). Default: 0.05
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="MinSegmentDurationSeconds"
+                >Min Segment Duration (seconds)</label
+              >
+              <input
+                id="MinSegmentDurationSeconds"
+                type="number"
+                min="1"
+                max="60"
+                is="emby-input"
+              />
+              <div class="field-description">
+                Segments shorter than this are merged into neighbors to reduce
+                noise. Default: 1
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="FfprobePath">FFprobe Path (optional)</label>
+              <input
+                id="FfprobePath"
+                type="text"
+                is="emby-input"
+                placeholder="Leave empty to use system PATH"
+              />
+              <div class="field-description">
+                Full path to the ffprobe binary. Leave empty to use the default
+                system PATH.
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="FfmpegPath">FFmpeg Path (optional)</label>
+              <input
+                id="FfmpegPath"
+                type="text"
+                is="emby-input"
+                placeholder="Leave empty to use system PATH"
+              />
+              <div class="field-description">
+                Full path to the ffmpeg binary. Leave empty to use the default
+                system PATH.
+              </div>
+            </div>
+
+            <div>
+              <button
+                is="emby-button"
+                type="submit"
+                class="raised button-submit block"
+              >
+                <span>Save</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <script type="text/javascript">
+        var VARatioConfig = {
+          pluginUniqueId: "c8a3f1e2-5b7d-4a9c-8e6f-3d2a1b0c9e8d",
+        };
+
+        document
+          .querySelector("#VARatioConfigPage")
+          .addEventListener("pageshow", function () {
+            Dashboard.showLoadingMsg();
+            ApiClient.getPluginConfiguration(VARatioConfig.pluginUniqueId).then(
+              function (config) {
+                document.querySelector("#BlackFrameThreshold").value =
+                  config.BlackFrameThreshold;
+                document.querySelector("#RatioTolerance").value =
+                  config.RatioTolerance;
+                document.querySelector("#MinSegmentDurationSeconds").value =
+                  config.MinSegmentDurationSeconds;
+                document.querySelector("#FfprobePath").value =
+                  config.FfprobePath || "";
+                document.querySelector("#FfmpegPath").value =
+                  config.FfmpegPath || "";
+                Dashboard.hideLoadingMsg();
+              },
+            );
+          });
+
+        document
+          .querySelector("#VARatioConfigForm")
+          .addEventListener("submit", function (e) {
+            e.preventDefault();
+            Dashboard.showLoadingMsg();
+            ApiClient.getPluginConfiguration(VARatioConfig.pluginUniqueId).then(
+              function (config) {
+                config.BlackFrameThreshold = parseInt(
+                  document.querySelector("#BlackFrameThreshold").value,
+                  10,
+                );
+                config.RatioTolerance = parseFloat(
+                  document.querySelector("#RatioTolerance").value,
+                );
+                config.MinSegmentDurationSeconds = parseInt(
+                  document.querySelector("#MinSegmentDurationSeconds").value,
+                  10,
+                );
+                config.FfprobePath =
+                  document.querySelector("#FfprobePath").value;
+                config.FfmpegPath = document.querySelector("#FfmpegPath").value;
+
+                ApiClient.updatePluginConfiguration(
+                  VARatioConfig.pluginUniqueId,
+                  config,
+                ).then(function () {
+                  Dashboard.processPluginConfigurationUpdateResult();
+                  Dashboard.hideLoadingMsg();
+                });
+              },
+            );
+            return false;
+          });
+      </script>
+    </div>
+  </body>
+</html>

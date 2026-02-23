@@ -1,9 +1,9 @@
-name: '🚀 Publish Plugin'
+name: "🚀 Publish Plugin"
 
 on:
   push:
     tags:
-      - '*'
+      - "*"
   workflow_dispatch:
     inputs:
       dotnet-version:
@@ -24,7 +24,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: '0'
+          fetch-depth: "0"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@baa11fbfe1d6520db94683bd5c7a3818018e4309 # v5.1.0
@@ -34,8 +34,8 @@ jobs:
       - name: Update build.yaml
         run: |-
           echo "set version to ${GITHUB_REF#refs/tags/}"
-          sed -i "s/version: .*/version: '${GITHUB_REF#refs/tags/}'/" ./src/build.yaml
-          
+          sed -i "s|version: .*|version: '${GITHUB_REF#refs/tags/}'|" ./src/build.yaml
+
           COMMIT_RANGE=$(git describe --tags --abbrev=0 @^)..@
           echo "generate changelog for commit range ${COMMIT_RANGE}"
           CHANGELOG=$(git log "$COMMIT_RANGE" --oneline --pretty=format:"- [%h] %s")
@@ -49,8 +49,8 @@ jobs:
         id: jprm
         with:
           dotnet-target: "${{ inputs.dotnet-target }}"
-          path: './src'
-          output: './artifacts'
+          path: "./src"
+          output: "./artifacts"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -92,13 +92,13 @@ jobs:
       - upload
     runs-on: ubuntu-latest
     permissions: # Job-level permissions configuration starts here
-      contents: write           # 'write' access to repository contents
-      pull-requests: write      # 'write' access to pull requests
+      contents: write # 'write' access to repository contents
+      pull-requests: write # 'write' access to pull requests
     steps:
       - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: '0'
+          fetch-depth: "0"
           ref: "master"
 
       - name: Download Artifact
@@ -111,13 +111,13 @@ jobs:
           echo "::group::Installing JPRM"
           python3 -m pip install jprm
           echo "::endgroup::"
-          
+
           RELEASE_TAG="${GITHUB_REF#refs/tags/}"
           echo "set release tag to ${RELEASE_TAG}, get release info..."
           RELEASE_INFO=$(curl -s "https://api.github.com/repos/${{ github.repository }}/releases/tags/${RELEASE_TAG}")
           DOWNLOAD_URL=$(echo "$RELEASE_INFO" | jq -r '.assets[] | select(.name | test("\\.zip$")) | .browser_download_url')
           echo "download url: ${DOWNLOAD_URL}"
-          
+
           echo "::group::Updating manifest.json"
           jprm repo add ./manifest.json "$(ls -d *.zip)" -u "${DOWNLOAD_URL}" -U "${DOWNLOAD_URL}"
           echo "::endgroup::"

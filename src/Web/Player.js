@@ -7,6 +7,7 @@
   let autoCropEnabled = false;
   let varData = null;
   let currentItemId = null;
+  let fetchingItemId = null;
   let observer = null;
   let animationFrameId = null;
 
@@ -52,6 +53,8 @@
   }
 
   async function fetchVarData(itemId) {
+    if (fetchingItemId === itemId) return;
+    fetchingItemId = itemId;
     try {
       const headers = {};
       if (
@@ -75,6 +78,8 @@
     } catch (e) {
       console.error("VARatio: Failed to fetch .var data", e);
       varData = null;
+    } finally {
+      fetchingItemId = null;
     }
   }
 
@@ -132,8 +137,14 @@
     // The item ID is usually available globally in Jellyfin, or we can find it
     // A reliable way is to intercept Jellyfin.playbackManager or ApiClient
     // For now, let's try to extract from the URL if it's there
-    const urlParams = new URLSearchParams(window.location.search);
-    let itemId = urlParams.get("id");
+    let itemId = new URLSearchParams(window.location.search).get("id");
+    if (
+      !itemId &&
+      window.ApiClient &&
+      window.ApiClient.lastPlaybackProgressOptions
+    ) {
+      itemId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
+    }
 
     // If not in URL, we wait for playback to start via Jellyfin's state
     if (itemId) {
@@ -142,6 +153,21 @@
     }
 
     video.addEventListener("play", () => {
+      if (!varData && !fetchingItemId) {
+        let currentId = new URLSearchParams(window.location.search).get("id");
+        if (
+          !currentId &&
+          window.ApiClient &&
+          window.ApiClient.lastPlaybackProgressOptions
+        ) {
+          currentId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
+        }
+        if (currentId) {
+          currentItemId = currentId;
+          fetchVarData(currentId);
+        }
+      }
+
       if (autoCropEnabled) {
         startCroppingLoop(video);
       }
@@ -167,6 +193,21 @@
 
   function startCroppingLoop(video) {
     const loop = () => {
+      if (autoCropEnabled && !varData && !fetchingItemId) {
+        let currentId = new URLSearchParams(window.location.search).get("id");
+        if (
+          !currentId &&
+          window.ApiClient &&
+          window.ApiClient.lastPlaybackProgressOptions
+        ) {
+          currentId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
+        }
+        if (currentId && currentId !== currentItemId) {
+          currentItemId = currentId;
+          fetchVarData(currentId);
+        }
+      }
+
       if (
         !video.paused &&
         !video.ended &&

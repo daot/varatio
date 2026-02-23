@@ -256,8 +256,8 @@
       scale = 1;
     }
 
-    // Apply smooth transition
-    video.style.transition = "transform 0.5s ease-in-out";
+    // Apply instant transition
+    video.style.transition = "none";
     video.style.transform = `scale(${scale})`;
   }
 

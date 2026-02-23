@@ -2,13 +2,14 @@ using MediaBrowser.Common.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
+using System.Text.RegularExpressions;
+
 namespace Jellyfin.Plugin.VARatio;
 
 public class WebInjector : IHostedService
 {
     private readonly IApplicationPaths _appPaths;
     private readonly ILogger<WebInjector> _logger;
-    private const string ScriptTag = "<script src=\"/VARatio/Player.js\"></script>";
 
     public WebInjector(IApplicationPaths appPaths, ILogger<WebInjector> logger)
     {
@@ -24,10 +25,30 @@ public class WebInjector : IHostedService
             if (File.Exists(indexPath))
             {
                 var content = File.ReadAllText(indexPath);
-                if (!content.Contains("/VARatio/Player.js"))
+                var version = typeof(WebInjector).Assembly.GetName().Version?.ToString() ?? "1.0";
+                var scriptTag = $"<script src=\"/VARatio/Player.js?v={version}\"></script>";
+
+                bool changed = false;
+
+                // Remove any existing VARatio script tags to prevent duplicates and update versions
+                var regex = new Regex(@"\s*<script src=""/VARatio/Player\.js[^""]*""></script>");
+                if (regex.IsMatch(content))
                 {
-                    _logger.LogInformation("Injecting VARatio Player.js into {IndexPath}", indexPath);
-                    content = content.Replace("</body>", "    " + ScriptTag + "\n</body>");
+                    // If the exact current scriptTag isn't what's matched, we will replace it.
+                    // Actually, easiest is to just remove all and re-inject.
+                    content = regex.Replace(content, "");
+                    changed = true;
+                }
+
+                if (!content.Contains(scriptTag))
+                {
+                    _logger.LogInformation("Injecting VARatio Player.js (v{Version}) into {IndexPath}", version, indexPath);
+                    content = content.Replace("</body>", "    " + scriptTag + "\n</body>");
+                    changed = true;
+                }
+
+                if (changed)
+                {
                     File.WriteAllText(indexPath, content);
                 }
             }

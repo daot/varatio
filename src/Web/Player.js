@@ -226,25 +226,24 @@
 
   // Fallback: observe DOM for the ActionSheet / Dialog containing video settings to inject our menu item
   new MutationObserver((mutations) => {
+    let shouldCheck = false;
     for (const mutation of mutations) {
       if (mutation.addedNodes.length > 0) {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1) {
-            // Element node
-            // Look for actionSheet which contains the Video Settings / Aspect Ratio menus
-            if (node.classList && node.classList.contains("actionSheet")) {
-              // Check contents to see if it's the video settings menu
-              if (
-                node.querySelector('[data-id="aspectratio"]') ||
-                node.querySelector('[data-id="quality"]') ||
-                node.textContent.includes("Aspect Ratio") ||
-                node.textContent.includes("Playback Speed")
-              ) {
-                injectIntoActionSheet(node);
-              }
-            }
-          }
-        });
+        shouldCheck = true;
+        break;
+      }
+    }
+    if (shouldCheck) {
+      const sheets = document.querySelectorAll(".actionSheet");
+      for (const sheet of sheets) {
+        if (
+          sheet.querySelector('[data-id="aspectratio"]') ||
+          sheet.querySelector('[data-id="quality"]') ||
+          sheet.textContent.includes("Aspect Ratio") ||
+          sheet.textContent.includes("Playback Speed")
+        ) {
+          injectIntoActionSheet(sheet);
+        }
       }
     }
   }).observe(document.body, { childList: true, subtree: true });

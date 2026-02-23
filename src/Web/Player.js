@@ -138,20 +138,12 @@
     return data;
   }
 
-  function scheduleNextFrame(video, callback) {
-    if ("requestVideoFrameCallback" in video) {
-      return video.requestVideoFrameCallback(callback);
-    } else {
-      return requestAnimationFrame(callback);
-    }
+  function scheduleNextFrame(windowCb) {
+    return requestAnimationFrame(windowCb);
   }
 
-  function cancelScheduledFrame(video, id) {
-    if ("cancelVideoFrameCallback" in video) {
-      video.cancelVideoFrameCallback(id);
-    } else {
-      cancelAnimationFrame(id);
-    }
+  function cancelScheduledFrame(id) {
+    cancelAnimationFrame(id);
   }
 
   function attachToVideo(video) {
@@ -210,12 +202,11 @@
     // Clean up when video unloads
     const cleanup = () => {
       video.style.transform = "";
-      video.style.willChange = "";
       video.dataset.currentRatio = ""; // reset ratio cache
       currentVideoRatio = null;
       varData = null;
       currentItemId = null;
-      if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
+      if (animationFrameId) cancelScheduledFrame(animationFrameId);
       animationFrameId = null;
     };
     video.addEventListener("emptied", cleanup);
@@ -223,20 +214,15 @@
 
   function startCroppingLoop(video) {
     if (animationFrameId) {
-      cancelScheduledFrame(video, animationFrameId);
+      cancelScheduledFrame(animationFrameId);
       animationFrameId = null;
     }
 
-    // Set will-change to prevent stuttering when transform applies
-    if (video.style.willChange !== "transform") {
-      video.style.willChange = "transform";
-    }
-
-    // Time extrapolation for browsers without requestVideoFrameCallback
+    // Time extrapolation works for all browsers and prevents Chromium HLS rVFC desyncs
     let lastVideoTime = -1;
     let lastVideoTimeObservedAt = 0;
 
-    const loop = (now, metadata) => {
+    const loop = (now) => {
       // Hot path: Minimize GC allocations and DOM access to avoid video skipping
       if (
         varData &&
@@ -247,27 +233,19 @@
       ) {
         let currentTime = 0;
 
-        // requestVideoFrameCallback provides exact presentation timestamp
-        if (metadata && typeof metadata.mediaTime === "number") {
-          currentTime = metadata.mediaTime;
-        } else {
-          // Fallback for Firefox/rAF: video.currentTime updates chunky (e.g. 250ms jumps)
-          // We interpolate the exact time using Date.now()
-          if (video.currentTime !== lastVideoTime) {
-            lastVideoTime = video.currentTime;
-            lastVideoTimeObservedAt = Date.now();
-          }
-          const elapsedTimeSinceLastTick =
-            (Date.now() - lastVideoTimeObservedAt) / 1000.0;
-          currentTime =
-            lastVideoTime + elapsedTimeSinceLastTick * video.playbackRate;
+        if (video.currentTime !== lastVideoTime) {
+          lastVideoTime = video.currentTime;
+          lastVideoTimeObservedAt = Date.now();
         }
+        const elapsedTimeSinceLastTick =
+          (Date.now() - lastVideoTimeObservedAt) / 1000.0;
+        currentTime =
+          lastVideoTime + elapsedTimeSinceLastTick * video.playbackRate;
 
-        // Find applicable segment
-        // Add 10ms (0.01) epsilon to fix float precision sync issues (ensures we don't apply one frame late)
+        // Find applicable segment. The server .var already offsets -5ms to compensate for MKV rounding.
         let newRatio = varData.segments[0].ratio;
         for (let i = varData.segments.length - 1; i >= 0; i--) {
-          if (currentTime + 0.01 >= varData.segments[i].time) {
+          if (currentTime >= varData.segments[i].time) {
             newRatio = varData.segments[i].ratio;
             break;
           }
@@ -301,10 +279,10 @@
       }
 
       if (autoCropEnabled && !video.paused && !video.ended) {
-        animationFrameId = scheduleNextFrame(video, loop);
+        animationFrameId = scheduleNextFrame(loop);
       }
     };
-    animationFrameId = scheduleNextFrame(video, loop);
+    animationFrameId = scheduleNextFrame(loop);
   }
 
   function applyCrop(video, targetAspectRatio) {
@@ -375,10 +353,9 @@
         const video = getVideoElement();
         if (video) {
           video.style.transform = "";
-          video.style.willChange = "";
           video.dataset.currentRatio = ""; // reset ratio
           currentVideoRatio = null;
-          if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
+          if (animationFrameId) cancelScheduledFrame(animationFrameId);
           animationFrameId = null;
         }
       }

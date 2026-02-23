@@ -8,6 +8,14 @@
         "category": "General",
         "versions": [
             {
+                "version": "0.1.6.0",
+                "changelog": "\n- [b7db642] change schema",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/daot/varatio/releases/download/v0.1.6/varatio_0.1.6.0.zip",
+                "checksum": "61425d72f290980945838d23d2ea33c3",
+                "timestamp": "2026-02-23T20:24:00Z"
+            },
+            {
                 "version": "0.1.5.0",
                 "changelog": "\n- [b7f7066] Fix: Robust cache busting with Guid\n- [bcac37e] Update manifest.json for release v0.1.4\n- [c5fb0f6] Merge branch 'main' of https://github.com/daot/varatio\n- [26632fe] Update manifest.json for release v0.1.3",
                 "targetAbi": "10.11.0.0",

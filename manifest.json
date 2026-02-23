@@ -1,1 +1,20 @@
-[]
+[
+    {
+        "guid": "c8a3f1e2-5b7d-4a9c-8e6f-3d2a1b0c9e8d",
+        "name": "VARatio",
+        "description": "VARatio analyzes video files for variable aspect ratios (e.g. IMAX scenes in Interstellar, The Dark Knight) and writes a custom .var file alongside the movie to encode the timing and ratio of each detected change. Black frames and fade transitions are handled gracefully.\n",
+        "overview": "Detect variable aspect ratios in movies and generate .var timing files",
+        "owner": "toad",
+        "category": "General",
+        "versions": [
+            {
+                "version": "0.1.0.0",
+                "changelog": "\n- [87055a6] Update manifest.json\n- [f8d0aaa] Update manifest.json\n- [e437c07] Create manifest.json\n- [e7c32b0] Update publish.yaml\n- [ba7791b] Update publish.yaml\n- [afe5b5d] Update publish.yaml\n- [14223fd] Update publish.yaml\n- [7197493] Update publish.yaml\n- [fde6e26] Update publish.yaml\n- [f1347bf] workflow",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/daot/varatio/releases/download/v0.1.0/varatio_0.1.0.0.zip",
+                "checksum": "e71cec0060b9b0e70da8eb3dcebb2e86",
+                "timestamp": "2026-02-23T18:52:27Z"
+            }
+        ]
+    }
+]

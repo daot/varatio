@@ -138,12 +138,20 @@
     return data;
   }
 
-  function scheduleNextFrame(windowCb) {
-    return requestAnimationFrame(windowCb);
+  function scheduleNextFrame(video, callback) {
+    if ("requestVideoFrameCallback" in video) {
+      return video.requestVideoFrameCallback(callback);
+    } else {
+      return requestAnimationFrame((now) => callback(now, null));
+    }
   }
 
-  function cancelScheduledFrame(id) {
-    cancelAnimationFrame(id);
+  function cancelScheduledFrame(video, id) {
+    if ("cancelVideoFrameCallback" in video) {
+      video.cancelVideoFrameCallback(id);
+    } else {
+      cancelAnimationFrame(id);
+    }
   }
 
   function attachToVideo(video) {
@@ -206,7 +214,7 @@
       currentVideoRatio = null;
       varData = null;
       currentItemId = null;
-      if (animationFrameId) cancelScheduledFrame(animationFrameId);
+      if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
       animationFrameId = null;
     };
     video.addEventListener("emptied", cleanup);
@@ -214,15 +222,15 @@
 
   function startCroppingLoop(video) {
     if (animationFrameId) {
-      cancelScheduledFrame(animationFrameId);
+      cancelScheduledFrame(video, animationFrameId);
       animationFrameId = null;
     }
 
-    // Time extrapolation works for all browsers and prevents Chromium HLS rVFC desyncs
+    // Time extrapolation works for legacy browsers missing rVFC
     let lastVideoTime = -1;
     let lastVideoTimeObservedAt = 0;
 
-    const loop = (now) => {
+    const loop = (now, metadata) => {
       // Hot path: Minimize GC allocations and DOM access to avoid video skipping
       if (
         varData &&
@@ -233,14 +241,19 @@
       ) {
         let currentTime = 0;
 
-        if (video.currentTime !== lastVideoTime) {
-          lastVideoTime = video.currentTime;
-          lastVideoTimeObservedAt = Date.now();
+        // Use exact frame presentation timestamp from rVFC if available (Chrome, Firefox 135+)
+        if (metadata && typeof metadata.mediaTime === "number") {
+          currentTime = metadata.mediaTime;
+        } else {
+          if (video.currentTime !== lastVideoTime) {
+            lastVideoTime = video.currentTime;
+            lastVideoTimeObservedAt = Date.now();
+          }
+          const elapsedTimeSinceLastTick =
+            (Date.now() - lastVideoTimeObservedAt) / 1000.0;
+          currentTime =
+            lastVideoTime + elapsedTimeSinceLastTick * video.playbackRate;
         }
-        const elapsedTimeSinceLastTick =
-          (Date.now() - lastVideoTimeObservedAt) / 1000.0;
-        currentTime =
-          lastVideoTime + elapsedTimeSinceLastTick * video.playbackRate;
 
         // Find applicable segment. The server .var already offsets -5ms to compensate for MKV rounding.
         let newRatio = varData.segments[0].ratio;
@@ -279,10 +292,10 @@
       }
 
       if (autoCropEnabled && !video.paused && !video.ended) {
-        animationFrameId = scheduleNextFrame(loop);
+        animationFrameId = scheduleNextFrame(video, loop);
       }
     };
-    animationFrameId = scheduleNextFrame(loop);
+    animationFrameId = scheduleNextFrame(video, loop);
   }
 
   function applyCrop(video, targetAspectRatio) {
@@ -355,7 +368,7 @@
           video.style.transform = "";
           video.dataset.currentRatio = ""; // reset ratio
           currentVideoRatio = null;
-          if (animationFrameId) cancelScheduledFrame(animationFrameId);
+          if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
           animationFrameId = null;
         }
       }

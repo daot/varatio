@@ -17,8 +17,9 @@
     </ItemGroup>
 
     <ItemGroup>
-        <None Remove="config.html"/>
-        <EmbeddedResource Include="config.html"/>
-        <EmbeddedResource Include="Web\Player.js"/>
+        <None Remove="config.html" />
+        <None Remove="Web\Player.js" />
+        <EmbeddedResource Include="config.html" />
+        <EmbeddedResource Include="Web\Player.js" />
     </ItemGroup>
 </Project>

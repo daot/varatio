@@ -9,6 +9,7 @@ public class PluginRegister : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<AspectRatioAnalyzer>();
+        serviceCollection.AddSingleton<IVarTimelineProvider, VarTimelineProvider>();
         serviceCollection.AddHostedService<WebInjector>();
     }
 }

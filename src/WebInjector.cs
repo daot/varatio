@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace Jellyfin.Plugin.VARatio;
 
+
 public class WebInjector : IHostedService
 {
     private readonly IApplicationPaths _appPaths;
@@ -34,16 +35,14 @@ public class WebInjector : IHostedService
                 var regex = new Regex(@"\s*<script src=""/VARatio/Player\.js[^""]*""></script>");
                 if (regex.IsMatch(content))
                 {
-                    // If the exact current scriptTag isn't what's matched, we will replace it.
-                    // Actually, easiest is to just remove all and re-inject.
                     content = regex.Replace(content, "");
                     changed = true;
                 }
 
-                if (!content.Contains(scriptTag))
+                if (!content.Contains(scriptTag, StringComparison.Ordinal))
                 {
                     _logger.LogInformation("Injecting VARatio Player.js (v{Version}) into {IndexPath}", version, indexPath);
-                    content = content.Replace("</body>", "    " + scriptTag + "\n</body>");
+                    content = content.Replace("</body>", "    " + scriptTag + "\n</body>", StringComparison.Ordinal);
                     changed = true;
                 }
 
@@ -70,3 +69,4 @@ public class WebInjector : IHostedService
         return Task.CompletedTask;
     }
 }
+

@@ -12,26 +12,72 @@
     );
   }
 
-  function resolveItemId() {
+  function resolveItemIdSync() {
     try {
-      // Prefer URL query
+      // Prefer URL query (Jellyfin hash/router still exposes ?id= in many views)
       const url = new URL(window.location.href);
       const fromUrl = url.searchParams.get("id");
       if (fromUrl) {
+        console.log("VARatio: resolveItemIdSync from URL", fromUrl);
         return fromUrl;
       }
 
-      // Fallback to Jellyfin ApiClient state
+      // Fallback to Jellyfin ApiClient state if available
       if (
         window.ApiClient &&
         window.ApiClient.lastPlaybackProgressOptions &&
         window.ApiClient.lastPlaybackProgressOptions.ItemId
       ) {
-        return window.ApiClient.lastPlaybackProgressOptions.ItemId;
+        const fromProgress = window.ApiClient.lastPlaybackProgressOptions.ItemId;
+        console.log("VARatio: resolveItemIdSync from lastPlaybackProgressOptions", fromProgress);
+        return fromProgress;
       }
     } catch (e) {
-      console.error("VARatio: resolveItemId failed", e);
+      console.error("VARatio: resolveItemIdSync failed", e);
     }
+    return null;
+  }
+
+  async function resolveItemId() {
+    // Try cheap synchronous paths first
+    const immediate = resolveItemIdSync();
+    if (immediate) {
+      return immediate;
+    }
+
+    // As a fallback, query active sessions via ApiClient
+    try {
+      if (!window.ApiClient || typeof window.ApiClient.getSessions !== "function") {
+        console.log("VARatio: ApiClient.getSessions not available");
+        return null;
+      }
+
+      const currentUserId =
+        typeof window.ApiClient.getCurrentUserId === "function"
+          ? window.ApiClient.getCurrentUserId()
+          : null;
+
+      const sessions = await window.ApiClient.getSessions({
+        activeWithinSeconds: 300,
+      });
+
+      if (Array.isArray(sessions)) {
+        for (let i = 0; i < sessions.length; i++) {
+          const s = sessions[i];
+          if (!s.NowPlayingItem || !s.NowPlayingItem.Id) {
+            continue;
+          }
+          if (currentUserId && s.UserId && s.UserId !== currentUserId) {
+            continue;
+          }
+          console.log("VARatio: resolveItemId from sessions", s.NowPlayingItem.Id);
+          return s.NowPlayingItem.Id;
+        }
+      }
+    } catch (e) {
+      console.error("VARatio: resolveItemId from sessions failed", e);
+    }
+
     return null;
   }
 
@@ -101,11 +147,11 @@
 
     let switchedOnce = false;
 
-    video.addEventListener("play", () => {
+    video.addEventListener("play", async () => {
       if (switchedOnce) {
         return;
       }
-      const itemId = resolveItemId();
+      const itemId = await resolveItemId();
       if (!itemId) {
         console.log("VARatio: play event but no itemId");
         return;

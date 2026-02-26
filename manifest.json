@@ -8,6 +8,14 @@
         "category": "General",
         "versions": [
             {
+                "version": "0.1.21.0",
+                "changelog": "\n- [679e0c5] Fix\n- [031d97e] Update manifest.json for release v0.1.20",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/daot/varatio/releases/download/v0.1.21/varatio_0.1.21.0.zip",
+                "checksum": "cb11750eb4569325f66529e0b79632c1",
+                "timestamp": "2026-02-26T17:00:25Z"
+            },
+            {
                 "version": "0.1.20.0",
                 "changelog": "\n- [90b8651] Fix\n- [257aad1] Update manifest.json for release v0.1.19\n- [ad1b9d9] Merge branch 'main' of https://github.com/daot/varatio\n- [8b0257f] Update manifest.json for release v0.1.18",
                 "targetAbi": "10.11.0.0",

@@ -81,6 +81,46 @@
     return null;
   }
 
+  function resolveItemIdForPlay(video) {
+    // 1) Try to parse from the video's currentSrc URL
+    try {
+      if (video && video.currentSrc) {
+        const u = new URL(video.currentSrc, window.location.origin);
+        const p = u.searchParams;
+        const fromParams =
+          p.get("itemId") ||
+          p.get("ItemId") ||
+          p.get("id") ||
+          p.get("MediaSourceId");
+        if (fromParams) {
+          console.log("VARatio: resolveItemId from currentSrc params", fromParams);
+          return fromParams;
+        }
+
+        const segments = u.pathname.split("/");
+        const guidRegex =
+          /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+        for (let i = 0; i < segments.length; i++) {
+          const s = segments[i];
+          if (guidRegex.test(s)) {
+            console.log("VARatio: resolveItemId from currentSrc path", s);
+            return s;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("VARatio: resolveItemIdForPlay from currentSrc failed", e);
+    }
+
+    // 2) Fallback to our synchronous helpers (URL + lastPlaybackProgressOptions)
+    const sync = resolveItemIdSync();
+    if (sync) {
+      return sync;
+    }
+
+    return null;
+  }
+
   async function hasVarData(itemId) {
     try {
       const headers = {};
@@ -147,11 +187,11 @@
 
     let switchedOnce = false;
 
-    video.addEventListener("play", async () => {
+    video.addEventListener("play", () => {
       if (switchedOnce) {
         return;
       }
-      const itemId = await resolveItemId();
+      const itemId = resolveItemIdForPlay(video);
       if (!itemId) {
         console.log("VARatio: play event but no itemId");
         return;

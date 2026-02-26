@@ -1,26 +1,21 @@
 // Player.js
-// Handles dynamic video cropping based on .var files
+// VARatio: Server-side cropped stream integration for Jellyfin
+//
+// When enabled, replaces the video source with a custom FFmpeg-transcoded stream
+// that has aspect ratio cropping baked in at the encoder level.
 
 (function () {
   console.log("VARatio script loaded");
 
-  let autoCropEnabled = false;
-  let varData = null;
+  let varatioCropEnabled = false;
   let currentItemId = null;
-  let fetchingItemId = null;
+  let hasVarData = false;
+  let checkingVarData = false;
   let observer = null;
-  let animationFrameId = null;
-  let currentVideoRatio = null;
+  let originalSrc = null;
 
-  // Listen for Jellyfin web client events
-  document.addEventListener("viewshow", function (e) {
-    if (e.detail && e.detail.type === "video-osd") {
-      console.log("VARatio: Video player view shown");
-    }
-  });
+  // ── DOM helpers ────────────────────────────────────────────────────────
 
-  // We can observe the DOM for the video player and menus
-  // Jellyfin uses a singleton class strategy for its video element
   function getVideoElement() {
     return (
       document.querySelector(".htmlVideoplayer") ||
@@ -28,26 +23,153 @@
     );
   }
 
+  function getAuthHeaders() {
+    const headers = {};
+    if (
+      window.ApiClient &&
+      typeof window.ApiClient.accessToken === "function"
+    ) {
+      headers["Authorization"] =
+        'MediaBrowser Token="' + window.ApiClient.accessToken() + '"';
+    }
+    return headers;
+  }
+
+  function getAccessToken() {
+    if (
+      window.ApiClient &&
+      typeof window.ApiClient.accessToken === "function"
+    ) {
+      return window.ApiClient.accessToken();
+    }
+    return null;
+  }
+
+  function getCurrentItemId() {
+    let itemId = new URLSearchParams(window.location.search).get("id");
+    if (
+      !itemId &&
+      window.ApiClient &&
+      window.ApiClient.lastPlaybackProgressOptions
+    ) {
+      itemId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
+    }
+    return itemId;
+  }
+
+  // ── VARatio data check ────────────────────────────────────────────────
+
+  async function checkVarData(itemId) {
+    if (checkingVarData || !itemId) return;
+    checkingVarData = true;
+    currentItemId = itemId;
+
+    try {
+      const response = await fetch("/VARatio/Data?itemId=" + itemId, {
+        headers: getAuthHeaders(),
+      });
+      hasVarData = response.ok;
+      console.log(
+        "VARatio: .var data " +
+          (hasVarData ? "available" : "not found") +
+          " for item " +
+          itemId,
+      );
+    } catch (e) {
+      console.error("VARatio: Failed to check .var data", e);
+      hasVarData = false;
+    } finally {
+      checkingVarData = false;
+    }
+  }
+
+  // ── Stream source swapping ────────────────────────────────────────────
+
+  function buildStreamUrl(itemId) {
+    var url = "/VARatio/Stream?itemId=" + itemId;
+    var token = getAccessToken();
+    if (token) {
+      url += "&api_key=" + encodeURIComponent(token);
+    }
+    return url;
+  }
+
+  function enableVaratioCrop() {
+    var video = getVideoElement();
+    if (!video || !currentItemId || !hasVarData) {
+      console.warn(
+        "VARatio: Cannot enable — missing video, item ID, or .var data",
+      );
+      return;
+    }
+
+    // Save the original source so we can restore it later
+    if (!originalSrc) {
+      originalSrc = video.src || video.currentSrc;
+    }
+
+    var currentTime = video.currentTime || 0;
+    var startTimeTicks = Math.round(currentTime * 10000000);
+    var streamUrl = buildStreamUrl(currentItemId);
+    if (startTimeTicks > 0) {
+      streamUrl += "&startTimeTicks=" + startTimeTicks;
+    }
+
+    console.log("VARatio: Switching to cropped stream:", streamUrl);
+
+    // Swap the video source
+    video.src = streamUrl;
+    video.load();
+    video.play().catch(function (e) {
+      console.warn("VARatio: Autoplay failed:", e);
+    });
+
+    varatioCropEnabled = true;
+  }
+
+  function disableVaratioCrop() {
+    var video = getVideoElement();
+    if (!video) return;
+
+    if (originalSrc) {
+      console.log("VARatio: Restoring original stream");
+      var currentTime = video.currentTime || 0;
+      video.src = originalSrc;
+      video.load();
+      video.currentTime = currentTime;
+      video.play().catch(function (e) {
+        console.warn("VARatio: Autoplay failed on restore:", e);
+      });
+      originalSrc = null;
+    }
+
+    varatioCropEnabled = false;
+  }
+
+  // ── DOM observer ──────────────────────────────────────────────────────
+
   let domCheckTimeout = null;
 
   function triggerDomCheck() {
     if (domCheckTimeout) return;
-    domCheckTimeout = setTimeout(() => {
+    domCheckTimeout = setTimeout(function () {
       domCheckTimeout = null;
 
-      const video = getVideoElement();
+      // Check for video element and fetch var data
+      var video = getVideoElement();
       if (video && !video.dataset.varatioAttached) {
         attachToVideo(video);
       }
 
-      const sheets = document.querySelectorAll(".actionSheet");
-      for (let i = 0; i < sheets.length; i++) {
-        const sheet = sheets[i];
+      // Check for action sheets to inject our toggle
+      var sheets = document.querySelectorAll(".actionSheet");
+      for (var i = 0; i < sheets.length; i++) {
+        var sheet = sheets[i];
         if (
           sheet.querySelector('[data-id="aspectratio"]') ||
           sheet.querySelector('[data-id="quality"]') ||
-          sheet.textContent.includes("Aspect Ratio") ||
-          sheet.textContent.includes("Playback Speed")
+          sheet.textContent.indexOf("Aspect Ratio") !== -1 ||
+          sheet.textContent.indexOf("Playback Speed") !== -1
         ) {
           injectIntoActionSheet(sheet);
         }
@@ -58,332 +180,103 @@
   function initVideoObserver() {
     if (observer) return;
 
-    observer = new MutationObserver((mutations) => {
-      let requiresCheck = false;
-      for (let i = 0; i < mutations.length; i++) {
+    observer = new MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i++) {
         if (mutations[i].addedNodes.length > 0) {
-          requiresCheck = true;
+          triggerDomCheck();
           break;
         }
-      }
-      if (requiresCheck) {
-        triggerDomCheck();
       }
     });
 
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  async function fetchVarData(itemId) {
-    if (fetchingItemId === itemId) return;
-    fetchingItemId = itemId;
-    try {
-      const headers = {};
-      if (
-        window.ApiClient &&
-        typeof window.ApiClient.accessToken === "function"
-      ) {
-        headers["Authorization"] =
-          'MediaBrowser Token="' + window.ApiClient.accessToken() + '"';
-      }
-      const response = await fetch("/VARatio/Data?itemId=" + itemId, {
-        headers,
-      });
-      if (response.ok) {
-        const text = await response.text();
-        varData = parseVarData(text);
-        console.log("VARatio: Loaded .var data for item", itemId, varData);
-      } else {
-        console.log("VARatio: No .var data available for this item.");
-        varData = null;
-      }
-    } catch (e) {
-      console.error("VARatio: Failed to fetch .var data", e);
-      varData = null;
-    } finally {
-      fetchingItemId = null;
-    }
-  }
-
-  function parseVarData(text) {
-    const lines = text.split("\n").map((l) => l.trim());
-    const data = { segments: [] };
-
-    let i = 0;
-    while (i < lines.length) {
-      const line = lines[i];
-      if (line.startsWith("FrameWidth:"))
-        data.frameWidth = parseFloat(line.split(":")[1].trim());
-      if (line.startsWith("FrameHeight:"))
-        data.frameHeight = parseFloat(line.split(":")[1].trim());
-
-      // Check for segment number
-      if (/^\d+$/.test(line) && i + 2 < lines.length) {
-        const timeStr = lines[i + 1];
-        const ratioStr = lines[i + 2];
-
-        if (timeStr.startsWith("Time:")) {
-          data.segments.push({
-            time: parseFloat(timeStr.split(":")[1].trim()),
-            ratio: parseFloat(ratioStr),
-          });
-          i += 2;
-        }
-      }
-      i++;
-    }
-
-    // Sort by time
-    data.segments.sort((a, b) => a.time - b.time);
-    return data;
-  }
-
-  function scheduleNextFrame(video, callback) {
-    if ("requestVideoFrameCallback" in video) {
-      return video.requestVideoFrameCallback(callback);
-    } else {
-      return requestAnimationFrame((now) => callback(now, null));
-    }
-  }
-
-  function cancelScheduledFrame(video, id) {
-    if ("cancelVideoFrameCallback" in video) {
-      video.cancelVideoFrameCallback(id);
-    } else {
-      cancelAnimationFrame(id);
-    }
-  }
+  // ── Video attachment ──────────────────────────────────────────────────
 
   function attachToVideo(video) {
     video.dataset.varatioAttached = "true";
     console.log("VARatio: Attached to video");
 
-    // The item ID is usually available globally in Jellyfin, or we can find it
-    // A reliable way is to intercept Jellyfin.playbackManager or ApiClient
-    // For now, let's try to extract from the URL if it's there
-    let itemId = new URLSearchParams(window.location.search).get("id");
-    if (
-      !itemId &&
-      window.ApiClient &&
-      window.ApiClient.lastPlaybackProgressOptions
-    ) {
-      itemId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
-    }
-
-    // If not in URL, we wait for playback to start via Jellyfin's state
+    // Try to get item ID and check for .var data
+    var itemId = getCurrentItemId();
     if (itemId) {
-      currentItemId = itemId;
-      fetchVarData(itemId);
+      checkVarData(itemId);
     }
 
-    video.addEventListener("play", () => {
-      if (!varData && !fetchingItemId) {
-        let currentId = new URLSearchParams(window.location.search).get("id");
-        if (
-          !currentId &&
-          window.ApiClient &&
-          window.ApiClient.lastPlaybackProgressOptions
-        ) {
-          currentId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
-        }
-        if (currentId) {
-          currentItemId = currentId;
-          fetchVarData(currentId);
+    video.addEventListener("play", function () {
+      if (!hasVarData && !checkingVarData) {
+        var currentId = getCurrentItemId();
+        if (currentId && currentId !== currentItemId) {
+          checkVarData(currentId);
         }
       }
-
-      if (autoCropEnabled) {
-        startCroppingLoop(video);
-      }
     });
 
-    video.addEventListener("pause", () => {
-      if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
-      animationFrameId = null;
-    });
-
-    video.addEventListener("ended", () => {
-      if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
-      animationFrameId = null;
-    });
-
-    // Clean up when video unloads
-    const cleanup = () => {
-      video.style.transform = "";
-      video.dataset.currentRatio = ""; // reset ratio cache
-      currentVideoRatio = null;
-      varData = null;
+    // Clean up state when video unloads
+    video.addEventListener("emptied", function () {
+      hasVarData = false;
       currentItemId = null;
-      if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
-      animationFrameId = null;
-    };
-    video.addEventListener("emptied", cleanup);
+      originalSrc = null;
+      varatioCropEnabled = false;
+    });
   }
 
-  function startCroppingLoop(video) {
-    if (animationFrameId) {
-      cancelScheduledFrame(video, animationFrameId);
-      animationFrameId = null;
-    }
-
-    // Time extrapolation works for legacy browsers missing rVFC
-    let lastVideoTime = -1;
-    let lastVideoTimeObservedAt = 0;
-
-    const loop = (now, metadata) => {
-      // Hot path: Minimize GC allocations and DOM access to avoid video skipping
-      if (
-        varData &&
-        varData.segments.length > 0 &&
-        autoCropEnabled &&
-        !video.paused &&
-        !video.ended
-      ) {
-        let currentTime = 0;
-
-        // Use exact frame presentation timestamp from rVFC if available (Chrome, Firefox 135+)
-        if (metadata && typeof metadata.mediaTime === "number") {
-          currentTime = metadata.mediaTime;
-        } else {
-          if (video.currentTime !== lastVideoTime) {
-            lastVideoTime = video.currentTime;
-            lastVideoTimeObservedAt = Date.now();
-          }
-          const elapsedTimeSinceLastTick =
-            (Date.now() - lastVideoTimeObservedAt) / 1000.0;
-          currentTime =
-            lastVideoTime + elapsedTimeSinceLastTick * video.playbackRate;
-        }
-
-        // Find applicable segment. The server .var already offsets -5ms to compensate for MKV rounding.
-        let newRatio = varData.segments[0].ratio;
-        for (let i = varData.segments.length - 1; i >= 0; i--) {
-          if (currentTime >= varData.segments[i].time) {
-            newRatio = varData.segments[i].ratio;
-            break;
-          }
-        }
-
-        if (newRatio && newRatio !== currentVideoRatio) {
-          applyCrop(video, newRatio);
-          currentVideoRatio = newRatio;
-          video.dataset.currentRatio = newRatio.toString();
-        }
-      } else if (autoCropEnabled && !varData && !fetchingItemId) {
-        // We defer URLSearchParams out of the hot path by checking only once a second
-        if (
-          !video.dataset.lastVarCheck ||
-          now - parseFloat(video.dataset.lastVarCheck) > 2000
-        ) {
-          video.dataset.lastVarCheck = now.toString();
-          let currentId = new URLSearchParams(window.location.search).get("id");
-          if (
-            !currentId &&
-            window.ApiClient &&
-            window.ApiClient.lastPlaybackProgressOptions
-          ) {
-            currentId = window.ApiClient.lastPlaybackProgressOptions.ItemId;
-          }
-          if (currentId && currentId !== currentItemId) {
-            currentItemId = currentId;
-            fetchVarData(currentId);
-          }
-        }
-      }
-
-      if (autoCropEnabled && !video.paused && !video.ended) {
-        animationFrameId = scheduleNextFrame(video, loop);
-      }
-    };
-    animationFrameId = scheduleNextFrame(video, loop);
-  }
-
-  function applyCrop(video, targetAspectRatio) {
-    if (!varData.frameWidth || !varData.frameHeight) return;
-
-    const sourceAspectRatio = varData.frameWidth / varData.frameHeight;
-
-    let scale = 1;
-    // If the target aspect ratio is wider than the source, we need to zoom in
-    if (targetAspectRatio > sourceAspectRatio) {
-      // For example, source is 16:9 (1.77), target is 2.35:1
-      // The video file contains black bars top and bottom
-      // We need to scale the video up to fill the height, and rely on overflow: hidden to crop the sides
-
-      // Wait, actually, the web player container determines how it's handled.
-      // If the video element itself is strictly fitted to the screen (contain):
-      // Scaling it up will make it overflow the container, effectively cropping the black bars.
-      scale = targetAspectRatio / sourceAspectRatio;
-    } else {
-      // Target aspect ratio is taller than or equal to source.
-      // Say source is 16:9, target is 16:9. Scale is 1.
-      scale = 1;
-    }
-
-    // Apply instant transition
-    video.style.transition = "none";
-    video.style.transform = `scale(${scale})`;
-  }
-
-  function injectMenuOption() {
-    // We will intercept the global player menu when it is rendered
-  }
-
-  // We use a single observer now inside initVideoObserver()
+  // ── Action sheet toggle ───────────────────────────────────────────────
 
   function injectIntoActionSheet(actionSheet) {
-    // Check if our option is already there
     if (actionSheet.querySelector(".varatio-option")) return;
 
-    const list = actionSheet.querySelector(".actionSheetScroller");
+    var list = actionSheet.querySelector(".actionSheetScroller");
     if (!list) return;
 
-    const btn = document.createElement("button");
+    var btn = document.createElement("button");
     btn.type = "button";
     btn.className = "actionSheetMenuItem emby-button varatio-option";
-    btn.innerHTML = `
-            <div class="actionSheetItemIcon">
-                <span class="material-icons crop_free"></span>
-            </div>
-            <div class="actionSheetMenuItemText" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                <span>VARatio (Auto Crop)</span>
-                <span class="material-icons ${autoCropEnabled ? "check" : ""}" style="margin-left: auto;"></span>
-            </div>
-        `;
+    btn.innerHTML =
+      '<div class="actionSheetItemIcon">' +
+      '<span class="material-icons crop_free"></span>' +
+      "</div>" +
+      '<div class="actionSheetMenuItemText" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">' +
+      "<span>VARatio (Auto Crop)</span>" +
+      '<span class="material-icons ' +
+      (varatioCropEnabled ? "check" : "") +
+      '" style="margin-left: auto;"></span>' +
+      "</div>";
 
-    btn.addEventListener("click", () => {
-      autoCropEnabled = !autoCropEnabled;
-      // Update ui
-      const icon = btn.querySelector(".check, .material-icons:last-child");
-      if (autoCropEnabled) {
+    btn.addEventListener("click", function () {
+      if (!varatioCropEnabled) {
+        enableVaratioCrop();
+      } else {
+        disableVaratioCrop();
+      }
+
+      // Update the icon
+      var icon = btn.querySelector(".material-icons:last-child");
+      if (varatioCropEnabled) {
         icon.classList.add("check");
-        icon.textContent = "check"; // Depending on jellyfin's icon set
-        const video = getVideoElement();
-        if (video) startCroppingLoop(video);
+        icon.textContent = "check";
       } else {
         icon.classList.remove("check");
         icon.textContent = "";
-        const video = getVideoElement();
-        if (video) {
-          video.style.transform = "";
-          video.dataset.currentRatio = ""; // reset ratio
-          currentVideoRatio = null;
-          if (animationFrameId) cancelScheduledFrame(video, animationFrameId);
-          animationFrameId = null;
-        }
       }
     });
 
-    // Add it to the list
     list.appendChild(btn);
   }
 
-  // Watch for ItemId change via playbackManager
-  // In Jellyfin, there's usually an Events class or window.PlaybackManager we can hook into.
+  // ── Event hooks ───────────────────────────────────────────────────────
+
   document.addEventListener("playbackstart", function (e) {
     if (e.detail && e.detail.item) {
       currentItemId = e.detail.item.Id;
-      fetchVarData(currentItemId);
+      checkVarData(currentItemId);
+    }
+  });
+
+  document.addEventListener("viewshow", function (e) {
+    if (e.detail && e.detail.type === "video-osd") {
+      console.log("VARatio: Video player view shown");
     }
   });
 

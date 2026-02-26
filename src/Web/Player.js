@@ -187,11 +187,11 @@
 
     let switchedOnce = false;
 
-    video.addEventListener("play", () => {
+    video.addEventListener("play", async () => {
       if (switchedOnce) {
         return;
       }
-      const itemId = resolveItemIdForPlay(video);
+      const itemId = await resolveItemId();
       if (!itemId) {
         console.log("VARatio: play event but no itemId");
         return;

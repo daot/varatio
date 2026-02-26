@@ -153,4 +153,17 @@
   }
 
   initVideoObserver();
+
+  document.addEventListener("playbackstart", (e) => {
+    try {
+      if (!e || !e.detail || !e.detail.item || !e.detail.item.Id) {
+        return;
+      }
+      const itemId = e.detail.item.Id;
+      console.log("VARatio: playbackstart for item", itemId);
+      switchToVarStream(itemId);
+    } catch (err) {
+      console.error("VARatio: playbackstart handler error", err);
+    }
+  });
 })();

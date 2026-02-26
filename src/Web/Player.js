@@ -211,10 +211,10 @@
         return;
       }
       switchedOnce = true;
-      // Give the server a moment to attach NowPlayingItem to the session, then try (with retries)
+      // Give the server time to attach NowPlayingItem to the session, then try (with retries)
       setTimeout(function () {
         switchToVarStream(itemId);
-      }, 400);
+      }, 1200);
     });
   }
 

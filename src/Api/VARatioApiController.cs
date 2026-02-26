@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Mime;
+using System.Security.Claims;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Session;
 using Microsoft.AspNetCore.Authorization;
@@ -31,9 +32,20 @@ public class VARatioApiController : ControllerBase
     }
 
     /// <summary>
-    /// Resolves a GUID to a library item. If it's not a direct item id, tries to find it from active sessions (e.g. MediaSourceId / PlaySessionId from the video URL).
+    /// Gets the requesting user's ID from the current HTTP context (when [Authorize] is used).
     /// </summary>
-    private Guid? ResolveToLibraryItemId(Guid guid)
+    private Guid? GetRequestUserId()
+    {
+        var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value;
+        return Guid.TryParse(claim, out var userId) ? userId : null;
+    }
+
+    /// <summary>
+    /// Resolves a GUID to a library item. If it's not a direct item id, tries to find it from active sessions (e.g. MediaSourceId / PlaySessionId from the video URL).
+    /// When requestUserId is set, only sessions belonging to that user are considered for fallback resolution.
+    /// </summary>
+    private Guid? ResolveToLibraryItemId(Guid guid, Guid? requestUserId)
     {
         var item = _libraryManager.GetItemById(guid);
         if (item != null && !string.IsNullOrEmpty(item.Path))
@@ -48,6 +60,11 @@ public class VARatioApiController : ControllerBase
 
         foreach (var session in _sessionManager.Sessions)
         {
+            if (requestUserId != null && session.UserId != requestUserId.Value)
+            {
+                continue;
+            }
+
             if (session.NowPlayingItem?.Id == null)
             {
                 continue;
@@ -78,7 +95,7 @@ public class VARatioApiController : ControllerBase
             singleSessionItemId = libId;
         }
 
-        // Fallback: if exactly one session has playback, use it (client may have sent a GUID we don't store)
+        // Fallback: if exactly one session (for this user) has playback, use it (client may have sent a GUID we don't store)
         if (sessionsWithPlayback == 1 && singleSessionItemId != null)
         {
             _logger.LogDebug("VARatio: Resolved {Guid} to library item {ItemId} (single active session)", guid, singleSessionItemId);
@@ -99,7 +116,8 @@ public class VARatioApiController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> GetData([FromQuery] Guid itemId)
     {
-        var resolvedId = ResolveToLibraryItemId(itemId);
+        var requestUserId = GetRequestUserId();
+        var resolvedId = ResolveToLibraryItemId(itemId, requestUserId);
         if (resolvedId == null)
         {
             _logger.LogWarning("VARatio: GetData - item {ItemId} not found and could not resolve from sessions", itemId);
@@ -155,7 +173,8 @@ public class VARatioApiController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task Stream([FromQuery] Guid itemId, CancellationToken cancellationToken)
     {
-        var resolvedId = ResolveToLibraryItemId(itemId);
+        var requestUserId = GetRequestUserId();
+        var resolvedId = ResolveToLibraryItemId(itemId, requestUserId);
         if (resolvedId == null)
         {
             Response.StatusCode = StatusCodes.Status404NotFound;

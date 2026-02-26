@@ -85,6 +85,11 @@ public class VARatioApiController : ControllerBase
             return singleSessionItemId;
         }
 
+        _logger.LogDebug(
+            "VARatio: Could not resolve {Guid}; total sessions={Total}, sessions with NowPlayingItem={WithPlayback}",
+            guid,
+            _sessionManager.Sessions.Count(),
+            sessionsWithPlayback);
         return null;
     }
 

@@ -121,7 +121,15 @@
     return null;
   }
 
-  async function hasVarData(itemId) {
+  async function fetchVarDataOnce(itemId, headers) {
+    const response = await fetch("/VARatio/Data?itemId=" + itemId, {
+      method: "GET",
+      headers: headers || {},
+    });
+    return response.ok;
+  }
+
+  async function hasVarData(itemId, retries = 3) {
     try {
       const headers = {};
       if (
@@ -132,12 +140,18 @@
           'MediaBrowser Token="' + window.ApiClient.accessToken() + '"';
       }
 
-      const response = await fetch("/VARatio/Data?itemId=" + itemId, {
-        method: "GET",
-        headers,
-      });
-
-      return response.ok;
+      for (let attempt = 0; attempt < retries; attempt++) {
+        if (attempt > 0) {
+          await new Promise(function (r) {
+            setTimeout(r, 600 * attempt);
+          });
+        }
+        const ok = await fetchVarDataOnce(itemId, headers);
+        if (ok) {
+          return true;
+        }
+      }
+      return false;
     } catch (e) {
       console.error("VARatio: Failed to query VAR data", e);
       return false;
@@ -191,14 +205,16 @@
       if (switchedOnce) {
         return;
       }
-      // Use GUID from video URL (session/MediaSource id); server resolves to library item for .var lookup
       const itemId = resolveItemIdForPlay(video);
       if (!itemId) {
         console.log("VARatio: play event but no itemId");
         return;
       }
       switchedOnce = true;
-      switchToVarStream(itemId);
+      // Give the server a moment to attach NowPlayingItem to the session, then try (with retries)
+      setTimeout(function () {
+        switchToVarStream(itemId);
+      }, 400);
     });
   }
 

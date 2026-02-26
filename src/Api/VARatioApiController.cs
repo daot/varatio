@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Mime;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Session;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -15,15 +16,76 @@ public class VARatioApiController : ControllerBase
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<VARatioApiController> _logger;
     private readonly IVarTimelineProvider _timelineProvider;
+    private readonly ISessionManager _sessionManager;
 
     public VARatioApiController(
         ILibraryManager libraryManager,
         ILogger<VARatioApiController> logger,
-        IVarTimelineProvider timelineProvider)
+        IVarTimelineProvider timelineProvider,
+        ISessionManager sessionManager)
     {
         _libraryManager = libraryManager;
         _logger = logger;
         _timelineProvider = timelineProvider;
+        _sessionManager = sessionManager;
+    }
+
+    /// <summary>
+    /// Resolves a GUID to a library item. If it's not a direct item id, tries to find it from active sessions (e.g. MediaSourceId / PlaySessionId from the video URL).
+    /// </summary>
+    private Guid? ResolveToLibraryItemId(Guid guid)
+    {
+        var item = _libraryManager.GetItemById(guid);
+        if (item != null && !string.IsNullOrEmpty(item.Path))
+        {
+            return guid;
+        }
+
+        var guidStr = guid.ToString("N");
+        var guidStrDashes = guid.ToString();
+        Guid? singleSessionItemId = null;
+        var sessionsWithPlayback = 0;
+
+        foreach (var session in _sessionManager.Sessions)
+        {
+            if (session.NowPlayingItem?.Id == null)
+            {
+                continue;
+            }
+
+            sessionsWithPlayback++;
+            var libId = session.NowPlayingItem.Id;
+            if (libId == guid)
+            {
+                return libId;
+            }
+
+            if (string.Equals(session.Id, guidStrDashes, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(session.Id, guidStr, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("VARatio: Resolved session id {Guid} to library item {ItemId}", guid, libId);
+                return libId;
+            }
+
+            var mediaSourceId = session.PlayState?.MediaSourceId;
+            if (string.Equals(mediaSourceId, guidStrDashes, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(mediaSourceId, guidStr, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("VARatio: Resolved MediaSourceId {Guid} to library item {ItemId}", guid, libId);
+                return libId;
+            }
+
+            singleSessionItemId = libId;
+        }
+
+        // Fallback: if exactly one session has playback, use it (client may have sent a GUID we don't store)
+        if (sessionsWithPlayback == 1 && singleSessionItemId != null)
+        {
+            _logger.LogDebug("VARatio: Resolved {Guid} to library item {ItemId} (single active session)", guid, singleSessionItemId);
+            return singleSessionItemId;
+        }
+
+        return null;
     }
 
     [HttpGet("Data")]
@@ -32,10 +94,17 @@ public class VARatioApiController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> GetData([FromQuery] Guid itemId)
     {
-        var item = _libraryManager.GetItemById(itemId);
+        var resolvedId = ResolveToLibraryItemId(itemId);
+        if (resolvedId == null)
+        {
+            _logger.LogWarning("VARatio: GetData - item {ItemId} not found and could not resolve from sessions", itemId);
+            return NotFound("Item not found");
+        }
+
+        var item = _libraryManager.GetItemById(resolvedId.Value);
         if (item == null || string.IsNullOrEmpty(item.Path))
         {
-            _logger.LogWarning("VARatio: GetData - item {ItemId} not found", itemId);
+            _logger.LogWarning("VARatio: GetData - item {ItemId} not found", resolvedId);
             return NotFound("Item not found");
         }
 
@@ -81,7 +150,15 @@ public class VARatioApiController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task Stream([FromQuery] Guid itemId, CancellationToken cancellationToken)
     {
-        var item = _libraryManager.GetItemById(itemId);
+        var resolvedId = ResolveToLibraryItemId(itemId);
+        if (resolvedId == null)
+        {
+            Response.StatusCode = StatusCodes.Status404NotFound;
+            await Response.Body.FlushAsync(cancellationToken);
+            return;
+        }
+
+        var item = _libraryManager.GetItemById(resolvedId.Value);
         if (item == null || string.IsNullOrEmpty(item.Path))
         {
             Response.StatusCode = StatusCodes.Status404NotFound;

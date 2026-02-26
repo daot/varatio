@@ -187,11 +187,12 @@
 
     let switchedOnce = false;
 
-    video.addEventListener("play", async () => {
+    video.addEventListener("play", () => {
       if (switchedOnce) {
         return;
       }
-      const itemId = await resolveItemId();
+      // Use GUID from video URL (session/MediaSource id); server resolves to library item for .var lookup
+      const itemId = resolveItemIdForPlay(video);
       if (!itemId) {
         console.log("VARatio: play event but no itemId");
         return;

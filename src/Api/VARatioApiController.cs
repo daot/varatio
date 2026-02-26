@@ -35,6 +35,7 @@ public class VARatioApiController : ControllerBase
         var item = _libraryManager.GetItemById(itemId);
         if (item == null || string.IsNullOrEmpty(item.Path))
         {
+            _logger.LogWarning("VARatio: GetData - item {ItemId} not found", itemId);
             return NotFound("Item not found");
         }
 
@@ -44,11 +45,34 @@ public class VARatioApiController : ControllerBase
 
         if (!System.IO.File.Exists(varPath))
         {
+            _logger.LogInformation("VARatio: GetData - no .var file at {Path}", varPath);
             return NotFound("VARatio data not found for this item");
         }
 
+        _logger.LogInformation("VARatio: GetData - serving .var file {Path}", varPath);
         var content = await System.IO.File.ReadAllTextAsync(varPath);
         return Content(content, MediaTypeNames.Text.Plain);
+    }
+
+    [HttpGet("Player.js")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> GetPlayerScript()
+    {
+        var assembly = typeof(VARatioApiController).Assembly;
+        const string resourceName = "Jellyfin.Plugin.VARatio.Web.Player.js";
+
+        await using var stream = assembly.GetManifestResourceStream(resourceName);
+        if (stream == null)
+        {
+            _logger.LogError("VARatio: Player.js resource {Resource} not found in assembly", resourceName);
+            return NotFound("Player script not found in assembly resources");
+        }
+
+        using var reader = new StreamReader(stream);
+        var content = await reader.ReadToEndAsync();
+
+        return Content(content, "application/javascript");
     }
 
     [HttpGet("Stream")]
